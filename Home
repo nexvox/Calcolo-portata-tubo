@@ -1,0 +1,225 @@
+import React, { useState, useCallback } from 'react';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+
+const FlowCalculator = () => {
+  const [inputs, setInputs] = useState({
+    pressure: '',
+    fluidType: 'water',
+    length: '',
+    diameter: '',
+    material: 'PE',
+    elevation: '0',
+  });
+
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const getViscosity = (fluidType) => {
+    // Viscosità cinematica in m²/s a 20°C
+    const viscosities = {
+      water: 1.004e-6,
+      oil: 46e-6,
+      glycol: 17.2e-6,
+    };
+    return viscosities[fluidType];
+  };
+
+  const getRoughness = (material) => {
+    // Rugosità assoluta in metri
+    return material === 'PE' ? 1.5e-6 : 1.5e-7; // PE vs PVC
+  };
+
+  const calculateFlow = useCallback(() => {
+    try {
+      const {
+        pressure,
+        fluidType,
+        length,
+        diameter,
+        material,
+        elevation
+      } = inputs;
+
+      // Conversioni
+      const P = parseFloat(pressure);
+      const L = parseFloat(length);
+      const D = parseFloat(diameter) / 1000; // mm to m
+      const dH = parseFloat(elevation);
+      
+      if (!P || !L || !D) {
+        throw new Error("Inserisci tutti i valori richiesti");
+      }
+
+      // Area della sezione
+      const area = Math.PI * (D/2)**2;
+      
+      // Pressione totale considerando il dislivello
+      // Nota: il dislivello positivo RIDUCE la pressione disponibile
+      const pressurePa = (P * 100000) - (dH * 9.81 * 1000); // Correzione del segno qui
+      
+      // Verifica che ci sia abbastanza pressione per superare il dislivello
+      if (pressurePa <= 0) {
+        throw new Error("Pressione insufficiente per il dislivello specificato");
+      }
+
+      const deltaH = pressurePa / (9.81 * 1000);
+
+      const viscosity = getViscosity(fluidType);
+      const roughness = getRoughness(material);
+
+      // Calcolo iterativo
+      let velocity = Math.sqrt(2 * 9.81 * deltaH / L);
+      
+      for (let i = 0; i < 10; i++) {
+        const Re = (velocity * D) / viscosity;
+        const f = 0.25 / (Math.log10(roughness/(3.7*D) + 5.74/Re**0.9))**2;
+        const newVelocity = Math.sqrt((2 * 9.81 * deltaH * D) / (f * L));
+        
+        if (Math.abs(velocity - newVelocity) < 0.001) {
+          velocity = newVelocity;
+          break;
+        }
+        velocity = newVelocity;
+      }
+
+      const flow = velocity * area;
+      
+      setResult({
+        flowLs: flow * 1000,
+        flowM3h: flow * 3600,
+        velocity: velocity,
+        pressureAvailable: pressurePa / 100000, // Conversione in bar
+      });
+      setError(null);
+
+    } catch (err) {
+      setError(err.message);
+      setResult(null);
+    }
+  }, [inputs]);
+
+  const handleInputChange = (field, value) => {
+    setInputs(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  return (
+    <Card className="w-full max-w-2xl mx-auto">
+      <CardHeader>
+        <CardTitle>Calcolatore di Portata Tubi</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="pressure">Pressione (bar)</Label>
+            <Input
+              id="pressure"
+              type="number"
+              value={inputs.pressure}
+              onChange={(e) => handleInputChange('pressure', e.target.value)}
+              placeholder="Es: 3"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Tipo di Fluido</Label>
+            <Select 
+              value={inputs.fluidType} 
+              onValueChange={(value) => handleInputChange('fluidType', value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleziona fluido" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="water">Acqua</SelectItem>
+                <SelectItem value="oil">Olio</SelectItem>
+                <SelectItem value="glycol">Glicole</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="length">Lunghezza (m)</Label>
+            <Input
+              id="length"
+              type="number"
+              value={inputs.length}
+              onChange={(e) => handleInputChange('length', e.target.value)}
+              placeholder="Es: 450"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="diameter">Diametro (mm)</Label>
+            <Input
+              id="diameter"
+              type="number"
+              value={inputs.diameter}
+              onChange={(e) => handleInputChange('diameter', e.target.value)}
+              placeholder="Es: 90"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Materiale</Label>
+            <Select 
+              value={inputs.material} 
+              onValueChange={(value) => handleInputChange('material', value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleziona materiale" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PE">Polietilene (PE)</SelectItem>
+                <SelectItem value="PVC">PVC</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="elevation">Dislivello (m)</Label>
+            <Input
+              id="elevation"
+              type="number"
+              value={inputs.elevation}
+              onChange={(e) => handleInputChange('elevation', e.target.value)}
+              placeholder="Positivo se in salita"
+            />
+          </div>
+        </div>
+
+        <Button 
+          className="w-full mt-4" 
+          onClick={calculateFlow}
+        >
+          Calcola Portata
+        </Button>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {result && (
+          <div className="mt-4 space-y-2 p-4 bg-gray-50 rounded-lg">
+            <p className="font-medium">Risultati:</p>
+            <p>Portata: {result.flowLs.toFixed(1)} l/s</p>
+            <p>Portata: {result.flowM3h.toFixed(1)} m³/h</p>
+            <p>Velocità: {result.velocity.toFixed(2)} m/s</p>
+            <p>Pressione disponibile: {result.pressureAvailable.toFixed(2)} bar</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+export default FlowCalculator;
